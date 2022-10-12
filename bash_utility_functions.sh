@@ -215,41 +215,77 @@ function convert_secs_to_hours_mins_secs(){
     conv_s2h_duration_in_hms=`printf '%dh:%dm:%ds\n' $((conv_s2h_duration_in_secs/3600)) $((conv_s2h_duration_in_secs%3600/60)) $((conv_s2h_duration_in_secs%60))`
 }
 #------
-# Name: check_if_program_exists()
+# Name: check_runsas_linux_program_dependencies()
 # Desc: Checks if the dependencies have been installed and can install the missing dependencies automatically via "yum" 
 #   In: program-name or package-name (multiple inputs could be specified)
 #  Out: <NA>
 #------
-function check_if_program_exists(){
+function check_runsas_linux_program_dependencies(){
     # Dependency checker
-    for prg in "$@"
-    do
-        # Defaults
-        check_dependency_cmd=`which $prg`
+    if [[ "$ENABLE_RUNSAS_DEPENDENCY_CHECK" == "Y" ]]; then
+        for prg in "$@"
+        do
+            # Defaults
+            check_dependency_cmd=`which $prg`
 
-        # Check
-        printf "${white}"
-        if [[ -z "$check_dependency_cmd" ]]; then
-            printf "${red}\n*** ERROR: Dependency checks failed, ${white}${red_bg}$prg${white}${red} program is not found, this script requires this program to run. ***\n"
+            # Check
+            printf "${white}"
+            if [[ -z "$check_dependency_cmd" ]]; then
+                printf "${red}\n*** ERROR: Dependency checks failed, ${white}${red_bg}$prg${white}${red} program is not found, runSAS requires this program to run. ***\n"
 
-            # If the package installer is available try installing the missing dependency
-            if [[ ! -z `which $SERVER_PACKAGE_INSTALLER_PROGRAM` ]]; then
-                printf "${green}\nPress Y to auto install $prg (requires $SERVER_PACKAGE_INSTALLER_PROGRAM and sudo access if you're not root): ${white}"
-                read read_install_dependency
-                if [[ "$read_install_dependency" == "Y" ]]; then
-                    printf "${white}\nAttempting to install $prg, running ${green}sudo yum install $prg${white}...\n${white}"
-                    
-                    # Command 
-                    sudo $SERVER_PACKAGE_INSTALLER_PROGRAM install $prg
+                # If the package installer is available try installing the missing dependency
+                if [[ ! -z `which $SERVER_PACKAGE_INSTALLER_PROGRAM` ]]; then
+                    printf "${green}\nPress Y to auto install $prg (requires $SERVER_PACKAGE_INSTALLER_PROGRAM and sudo access if you're not root): ${white}"
+                    read read_install_dependency
+                    if [[ "$read_install_dependency" == "Y" ]]; then
+                        printf "${white}\nAttempting to install $prg, running ${green}sudo yum install $prg${white}...\n${white}"
+                        
+                        # Command 
+                        sudo $SERVER_PACKAGE_INSTALLER_PROGRAM install $prg
+
+                        # Test if it's installed now?
+                        if [[ ! -z `which $SERVER_PACKAGE_INSTALLER_PROGRAM` ]]; then
+                            printf "${red}\nAttempt to install the program didn't work, install the program ${yellow}$prg${white} manually (Google is your friend!) or ask server administrator.${white}\n${white}"
+                            clear_session_and_exit
+                        fi
+                    else
+                        printf "${white}Try installing this using $SERVER_PACKAGE_INSTALLER_PROGRAM, run ${green}sudo $SERVER_PACKAGE_INSTALLER_PROGRAM install $prg${white} or download the $prg package from web (Goooooogle!)"
+                    fi
                 else
-                    printf "${white}Try installing this using $SERVER_PACKAGE_INSTALLER_PROGRAM, run ${green}sudo $SERVER_PACKAGE_INSTALLER_PROGRAM install $prg${white} or download the $prg package from web (Goooooogle!)"
+                    printf "${green}\n$SERVER_PACKAGE_INSTALLER_PROGRAM not found, skipping auto-install.\n${white}"
+                    printf "${white}\nLaunch the script after installing the ${green}$prg${white} program manually (Google is your friend!) or ask server administrator.\n${white}"
+                    clear_session_and_exit
                 fi
-            else
-                printf "${green}\n$SERVER_PACKAGE_INSTALLER_PROGRAM not found, skipping auto-install.\n${white}"
             fi
-            clear_session_and_exit
-        fi
-    done
+        done
+    fi
+}
+#------
+# Name: remove_double_quotes_from_file_contents()
+# Desc: Removes all double quotes (") from the file contents
+#   In: file-name, options (--silent)
+#  Out: <NA>
+#------
+function remove_double_quotes_from_file_contents(){
+    in_doublequotes_filename=$1
+    in_doublequotes_opt=$2
+
+    in_doublequotes_tempout_file=./.tmp_doublequotes_check
+    
+    check_if_the_file_exists "${in_doublequotes_filename}"
+
+    grep -o '".*"' ${in_doublequotes_filename} | sed 's/"//g' > $in_doublequotes_tempout_file
+
+
+    if [ -s $in_doublequotes_tempout_file ]; then
+        if [[ ! "$in_doublequotes_opt" == "--silent" ]]; then
+            printf "\n${grey}NOTE: The file ${in_doublequotes_filename} has double-quotes in its contents, cleaning up...(review the file if needed) *** ${white}\n"
+        fi        
+
+        sed -i 's/\"//g' "$in_doublequotes_filename"
+    fi
+
+    delete_a_file "${in_doublequotes_tempout_file}" --silent
 }
 #------
 # Name: disable_keyboard_inputs()
@@ -1485,6 +1521,144 @@ function trim() {
   var="${var#"${var%%[![:space:]]*}"}" # trim leading whitespace chars
   var="${var%"${var##*[![:space:]]}"}" # trim trailing whitespace chars
   echo -n "$var"
+}
+#------
+# Name: remove_top_x_lines()
+# Desc: Removes top x number of lines
+#   In: <file-name>, <no-of-lines-to-remove>
+#  Out: <NA>
+#------
+function remove_top_x_lines(){
+    tail -n +${2} ${1} > ${1}.tmp; mv ${1}.tmp ${1}
+}
+#------
+# Name: remove_bottom_x_lines()
+# Desc: Removes bottom x number of lines
+#   In: <file-name>, <no-of-lines-to-remove>
+#  Out: <NA>
+#------
+function remove_bottom_x_lines(){
+   head -n -${2} ${1} > ${1}.tmp; mv ${1}.tmp ${1}
+}
+#------
+# Name: remove_empty_lines_from_file()
+# Desc: This function removes any unwanted empty lines from the file
+#   In: file-name
+#  Out: <NA>
+#------
+function remove_empty_lines_from_file(){
+	sed -i '/^$/d' $1
+}
+#------
+# Name: put_keyval()
+# Desc: Stores a key-value pair in a file
+#   In: key, value, file, delimeter
+#  Out: <NA>
+#------
+function put_keyval(){
+    # Input parameters
+    str_key=$1
+    str_val=$2
+    str_file="${3:-.parms}"
+    str_delim="${4:-\: }"
+
+    # Create a file if it doesn't exist
+    create_a_file_if_not_exists $str_file
+
+    # If the file exists remove the previous entry
+	if [ -f "$str_file" ]; then
+        sed -i "/\b$str_key\b/d" $str_file
+    fi 
+
+	# Add the new entry (or update the entry)
+    echo "$str_key$str_delim$str_val" >> $str_file # Add a new entry 
+
+    # Remove any empty lines
+    remove_empty_lines_from_file $str_file
+
+    # Debug
+    # print2debug str_key "\n*** Added key: " "(val: $str_val) to $str_file file ***"
+    # print2debug str_file "---Printing state file: " "(START)---\n"
+    # cat $str_file >> $RUNSAS_DEBUG_FILE
+}
+#------
+# Name: get_keyval()
+# Desc: Check job runtime for the last batch run
+#   In: key, file, delimeter (optional, default is ": "), variable-name (optional, default is key)
+#  Out: <NA>
+#------
+function get_keyval(){
+    # Parameters
+    ret_key=$1
+    ret_file="${2:-.parms}"
+    ret_delim="${3:-\: }"
+    ret_var=${4:-$1}
+    ret_debug=${5}
+
+    # Debug
+    # print2debug ret_key "\n*** Retreiving a key: " " with $ret_delim delimeter from $ret_file file (command: eval $ret_var=`awk -v pat="$ret_key" -F"$ret_delim" '$0~pat { print $2 }' $ret_file 2>/dev/null`) ***"
+    # print2debug ret_file "---Printing state file: " "(START)---\n"
+    # if [ -f "$ret_file" ]; then
+    #     cat $ret_file >> $RUNSAS_DEBUG_FILE
+    # fi
+
+    # Set the value found in the file to the key
+    if [ -f "$ret_file" ]; then
+        remove_empty_lines_from_file $ret_file
+        eval $ret_var=`awk -v pat="$ret_key" -F"$ret_delim" '$0~pat { print $2 }' $ret_file 2>/dev/null`
+    fi   
+
+    # Debug
+    if [[ "$ret_debug" == "debug" ]]; then
+        printf "${yellow}DEBUG keyval(key=$ret_key): [file=$ret_file | delim=$ret_delim | var=$ret_va ] ${white}\n"
+    fi
+}
+#------
+# Name: read_from_user()
+# Desc: Read inputs from user, saves and retrieves previously keyed in values as defaults 
+# Deps: get_keyval(), put_keyval(), set_colors_codes()
+#   In: <message>, <target-variable-name>, <target-variable-default-value>, <read-func-parameters, <--skip-keyval-store>
+#  Out: <NA>
+#------
+function read_from_user(){
+    # Input
+    rfu_message=${1}
+    rfu_var_name=${2}
+    rfu_default_value=${3}
+    rfu_other_opts=${4}
+
+    # Check for modifiers
+    for mods in "$@"
+    do
+        if [[ "${mods}" == "--skip-keyval-store" ]]; then 
+            skip_keyval_store=Y
+        else
+            skip_keyval_store=N
+        fi
+    done
+
+    if [[ ${skip_keyval_store} == "Y" ]]; then
+        read -e -p ${rfu_other_opts} "${rfu_message}: ${white}" -i "${rfu_default_value}" ${!rfu_var_name}
+    else
+        get_keyval ${rfu_var_name}
+        read -e -p ${rfu_other_opts} "${rfu_message}: ${white}" -i "${!rfu_var_name:-$rfu_default_value}" ${rfu_var_name}
+        put_keyval ${rfu_var_name} ${!rfu_var_name}
+    fi
+}
+#------
+# Name: enter_key()
+# Desc: This function will enable/disable enter keys
+#   In: <ON/OFF>
+#  Out: <NA>
+#------
+function enter_key(){
+    if [[ "${1}" == "OFF" ]] || [[ "${1}" == "off" ]]; then
+        # Disable carriage return (ENTER key) during the script run
+        stty igncr < /dev/tty
+    else
+        # Enable carriage return (ENTER key) during the script run
+        stty -igncr < /dev/tty
+    fi
 }
 ######################################################################################################################
 
